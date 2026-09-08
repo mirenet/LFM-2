@@ -76,11 +76,11 @@ public class MainActivity extends AppCompatActivity {
             container.addView(input);
 
             AlertDialog.Builder builder = new AlertDialog.Builder(this);
-            builder.setTitle("Sačuvaj fajl");
-            builder.setMessage("Unesi naziv fajla koji želiš da preuzmeš:");
+            builder.setTitle("Save File");
+            builder.setMessage("Enter File Name:");
             builder.setView(container);
 
-            builder.setPositiveButton("Preuzmi", (dialog, which) -> {
+            builder.setPositiveButton("Save", (dialog, which) -> {
                 String fileName = input.getText().toString().trim();
                 if (fileName.isEmpty()) {
                     fileName = suggestedFileName;
@@ -90,7 +90,7 @@ public class MainActivity extends AppCompatActivity {
                     android.app.DownloadManager.Request request = new android.app.DownloadManager.Request(Uri.parse(url));
                     request.setMimeType(mimetype);
                     request.setTitle(fileName);
-                    request.setDescription("Preuzimanje fajla...");
+                    request.setDescription("Saving File...");
                     request.allowScanningByMediaScanner();
                     request.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
                     request.setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, fileName);
@@ -98,14 +98,14 @@ public class MainActivity extends AppCompatActivity {
                     android.app.DownloadManager dm = (android.app.DownloadManager) getSystemService(DOWNLOAD_SERVICE);
                     if (dm != null) {
                         dm.enqueue(request);
-                        android.widget.Toast.makeText(getApplicationContext(), "Preuzimanje je počelo...", android.widget.Toast.LENGTH_SHORT).show();
+                        android.widget.Toast.makeText(getApplicationContext(), "Saving File...", android.widget.Toast.LENGTH_SHORT).show();
                     }
                 } catch (Exception e) {
-                    android.widget.Toast.makeText(getApplicationContext(), "Greška pri preuzimanju: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show();
+                    android.widget.Toast.makeText(getApplicationContext(), "Error: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show();
                 }
             });
 
-            builder.setNegativeButton("Otkaži", (dialog, which) -> dialog.cancel());
+            builder.setNegativeButton("Cancel", (dialog, which) -> dialog.cancel());
             builder.show();
         });
 
