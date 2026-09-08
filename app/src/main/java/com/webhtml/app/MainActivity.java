@@ -38,7 +38,6 @@ public class MainActivity extends AppCompatActivity {
     private WebView webView;
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
-    private String targetFileName = ""; // Čuva naziv fajla bezbedno u Javi
 
     @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
     @Override
@@ -101,20 +100,22 @@ public class MainActivity extends AppCompatActivity {
                 builder.setView(container);
 
                 builder.setPositiveButton("Save", (dialog, which) -> {
-                    targetFileName = input.getText().toString().trim();
-                    if (targetFileName.isEmpty()) {
-                        targetFileName = suggestedFileName;
+                    String inputName = input.getText().toString().trim();
+                    if (inputName.isEmpty()) {
+                        inputName = suggestedFileName;
                     }
+                    
+                    final String finalFileName = inputName.replaceAll("[\\\\/:*?\"<>|]", "_");
 
                     if (url.startsWith("http://") || url.startsWith("https://")) {
                         try {
                             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
                             request.setMimeType(mimetype);
-                            request.setTitle(targetFileName);
+                            request.setTitle(finalFileName);
                             request.setDescription("Downloading file...");
                             request.allowScanningByMediaScanner();
                             request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-                            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, targetFileName);
+                            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, finalFileName);
                             
                             DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
                             if (dm != null) {
@@ -125,13 +126,13 @@ public class MainActivity extends AppCompatActivity {
                             Toast.makeText(getApplicationContext(), "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
                         }
                     } else {
-                        // Čitamo blob preko JS, a naziv fajla uzimamo direktno iz Java promenljive targetFileName
+                        // Prosledjujemo ime direktno kroz JS varijablu unutar skripte da se ne bi izgubilo
                         String js = "fetch('" + url + "')" +
                                 ".then(res => res.blob())" +
                                 ".then(blob => {" +
                                 "  var reader = new FileReader();" +
                                 "  reader.onload = function() {" +
-                                "    window.AndroidDownloadBridge.saveDirectly(reader.result);" +
+                                "    window.AndroidDownloadBridge.saveDirectly(reader.result, '" + finalFileName.replace("'", "\\'") + "');" +
                                 "  };" +
                                 "  reader.readAsDataURL(blob);" +
                                 "});";
@@ -256,8 +257,8 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
-        public void saveDirectly(String base64Data) {
-            saveBase64ToFile(base64Data, targetFileName);
+        public void saveDirectly(String base64Data, String name) {
+            saveBase64ToFile(base64Data, name);
         }
     }
 
