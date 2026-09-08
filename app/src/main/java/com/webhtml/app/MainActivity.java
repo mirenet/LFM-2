@@ -2,10 +2,14 @@ package com.webhtml.app;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.content.ContentResolver;
+import android.content.ContentValues;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.MediaStore;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -233,7 +237,7 @@ public class MainActivity extends AppCompatActivity {
         webView.loadUrl("file:///android_asset/index.html");
     }
 
-    // Helper method using modern fetch API to reliably read blob/data URLs and save them
+    // Helper method using modern fetch API to reliably read blob/data URLs and save them via MediaStore / Scoped Storage
     private void saveBlobOrDataUrl(String blobUrl, String fileName) {
         String js = "fetch('" + blobUrl + "')" +
                 ".then(res => res.blob())" +
@@ -256,22 +260,39 @@ public class MainActivity extends AppCompatActivity {
                     }
                     byte[] decodedBytes = android.util.Base64.decode(base64Content, android.util.Base64.DEFAULT);
 
-                    File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                    if (!downloadsDir.exists()) {
-                        downloadsDir.mkdirs();
+                    OutputStream os = null;
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        ContentResolver resolver = getContentResolver();
+                        ContentValues contentValues = new ContentValues();
+                        contentValues.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+                        contentValues.put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream");
+                        contentValues.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+                        
+                        Uri uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues);
+                        if (uri != null) {
+                            os = resolver.openOutputStream(uri);
+                        }
+                    } else {
+                        File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                        if (!downloadsDir.exists()) {
+                            downloadsDir.mkdirs();
+                        }
+                        File file = new File(downloadsDir, name);
+                        os = new FileOutputStream(file);
+
+                        Intent scanIntent = new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE);
+                        scanIntent.setData(Uri.fromFile(file));
+                        sendBroadcast(scanIntent);
                     }
 
-                    File file = new File(downloadsDir, name);
-                    OutputStream os = new FileOutputStream(file);
-                    os.write(decodedBytes);
-                    os.flush();
-                    os.close();
-
-                    Intent scanIntent = new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE);
-                    scanIntent.setData(Uri.fromFile(file));
-                    sendBroadcast(scanIntent);
-
-                    runOnUiThread(() -> Toast.makeText(getApplicationContext(), "File saved: " + name, Toast.LENGTH_LONG).show());
+                    if (os != null) {
+                        os.write(decodedBytes);
+                        os.flush();
+                        os.close();
+                        runOnUiThread(() -> Toast.makeText(getApplicationContext(), "File saved: " + name, Toast.LENGTH_LONG).show());
+                    } else {
+                        throw new Exception("Could not open output stream for saving.");
+                    }
                 } catch (Exception e) {
                     runOnUiThread(() -> Toast.makeText(getApplicationContext(), "Error saving file: " + e.getMessage(), Toast.LENGTH_LONG).show());
                 } finally {
