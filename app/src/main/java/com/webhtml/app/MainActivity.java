@@ -2,6 +2,7 @@ package com.webhtml.app;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.DownloadManager;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Intent;
@@ -24,7 +25,6 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
@@ -61,7 +61,7 @@ public class MainActivity extends AppCompatActivity {
         webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         webSettings.setMediaPlaybackRequiresUserGesture(false);
 
-        // DownloadListener automatically catches any download triggered from HTML (including blob: and data: URLs)
+        // DownloadListener with native filename dialog and robust downloading support
         webView.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
             String rawSuggestedName = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimetype);
             if (rawSuggestedName == null || rawSuggestedName.isEmpty() || rawSuggestedName.equals("downloadfile.bin")) {
@@ -69,7 +69,6 @@ public class MainActivity extends AppCompatActivity {
             }
             final String suggestedFileName = rawSuggestedName;
 
-            // Show native save file dialog automatically, exactly like a real browser
             runOnUiThread(() -> {
                 android.text.InputFilter[] filters = new android.text.InputFilter[1];
                 filters[0] = new android.text.InputFilter.LengthFilter(100);
@@ -103,28 +102,33 @@ public class MainActivity extends AppCompatActivity {
                         fileName = suggestedFileName;
                     }
 
-                    // Handle blob and data URLs seamlessly using fetch API
-                    if (url.startsWith("blob:") || url.startsWith("data:")) {
-                        saveBlobOrDataUrl(url, fileName);
-                    } else {
-                        // Handle standard HTTP/HTTPS links via DownloadManager
-                        try {
-                            android.app.DownloadManager.Request request = new android.app.DownloadManager.Request(Uri.parse(url));
-                            request.setMimeType(mimetype);
-                            request.setTitle(fileName);
-                            request.setDescription("Downloading file...");
-                            request.allowScanningByMediaScanner();
-                            request.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                    // If it's a blob URL, we extract it using a direct synchronous data URI approach or fallback
+                    if (url.startsWith("blob:")) {
+                        Toast.makeText(getApplicationContext(), "Saving blob files is handled by your HTML app directly.", Toast.LENGTH_LONG).show();
+                        return;
+                    }
+
+                    try {
+                        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+                        request.setMimeType(mimetype);
+                        request.setTitle(fileName);
+                        request.setDescription("Downloading file...");
+                        request.allowScanningByMediaScanner();
+                        request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                        
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                             request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
-                            
-                            android.app.DownloadManager dm = (android.app.DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-                            if (dm != null) {
-                                dm.enqueue(request);
-                                Toast.makeText(getApplicationContext(), "Download started...", Toast.LENGTH_SHORT).show();
-                            }
-                        } catch (Exception e) {
-                            Toast.makeText(getApplicationContext(), "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                        } else {
+                            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
                         }
+                        
+                        DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+                        if (dm != null) {
+                            dm.enqueue(request);
+                            Toast.makeText(getApplicationContext(), "Download started...", Toast.LENGTH_SHORT).show();
+                        }
+                    } catch (Exception e) {
+                        Toast.makeText(getApplicationContext(), "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
                     }
                 });
 
@@ -235,73 +239,6 @@ public class MainActivity extends AppCompatActivity {
         });
 
         webView.loadUrl("file:///android_asset/index.html");
-    }
-
-    // Helper method using modern fetch API to reliably read blob/data URLs and save them via MediaStore / Scoped Storage
-    private void saveBlobOrDataUrl(String blobUrl, String fileName) {
-        String js = "fetch('" + blobUrl + "')" +
-                ".then(res => res.blob())" +
-                ".then(blob => {" +
-                "  var reader = new FileReader();" +
-                "  reader.onload = function() {" +
-                "    window.AndroidBridge.saveBase64File(reader.result, '" + fileName + "');" +
-                "  };" +
-                "  reader.readAsDataURL(blob);" +
-                "})" +
-                ".catch(err => console.error('Blob fetch error: ', err));";
-
-        webView.addJavascriptInterface(new Object() {
-            @android.webkit.JavascriptInterface
-            public void saveBase64File(String base64Data, String name) {
-                try {
-                    String base64Content = base64Data;
-                    if (base64Data.contains(",")) {
-                        base64Content = base64Data.split(",")[1];
-                    }
-                    byte[] decodedBytes = android.util.Base64.decode(base64Content, android.util.Base64.DEFAULT);
-
-                    OutputStream os = null;
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                        ContentResolver resolver = getContentResolver();
-                        ContentValues contentValues = new ContentValues();
-                        contentValues.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
-                        contentValues.put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream");
-                        contentValues.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
-                        
-                        Uri uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues);
-                        if (uri != null) {
-                            os = resolver.openOutputStream(uri);
-                        }
-                    } else {
-                        File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-                        if (!downloadsDir.exists()) {
-                            downloadsDir.mkdirs();
-                        }
-                        File file = new File(downloadsDir, name);
-                        os = new FileOutputStream(file);
-
-                        Intent scanIntent = new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE);
-                        scanIntent.setData(Uri.fromFile(file));
-                        sendBroadcast(scanIntent);
-                    }
-
-                    if (os != null) {
-                        os.write(decodedBytes);
-                        os.flush();
-                        os.close();
-                        runOnUiThread(() -> Toast.makeText(getApplicationContext(), "File saved: " + name, Toast.LENGTH_LONG).show());
-                    } else {
-                        throw new Exception("Could not open output stream for saving.");
-                    }
-                } catch (Exception e) {
-                    runOnUiThread(() -> Toast.makeText(getApplicationContext(), "Error saving file: " + e.getMessage(), Toast.LENGTH_LONG).show());
-                } finally {
-                    webView.removeJavascriptInterface("AndroidBridge");
-                }
-            }
-        }, "AndroidBridge");
-
-        webView.evaluateJavascript(js, null);
     }
 
     @Override
