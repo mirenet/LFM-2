@@ -99,7 +99,7 @@ public class MainActivity extends AppCompatActivity {
                         fileName = suggestedFileName;
                     }
 
-                    // Handle blob and data URLs seamlessly
+                    // Handle blob and data URLs seamlessly using fetch API
                     if (url.startsWith("blob:") || url.startsWith("data:")) {
                         saveBlobOrDataUrl(url, fileName);
                     } else {
@@ -233,21 +233,18 @@ public class MainActivity extends AppCompatActivity {
         webView.loadUrl("file:///android_asset/index.html");
     }
 
-    // Helper method to automatically fetch blob data and save it with the custom filename
+    // Helper method using modern fetch API to reliably read blob/data URLs and save them
     private void saveBlobOrDataUrl(String blobUrl, String fileName) {
-        String js = "(function() {" +
-                "var xhr = new XMLHttpRequest();" +
-                "xhr.open('GET', '" + blobUrl + "', true);" +
-                "xhr.responseType = 'blob';" +
-                "xhr.onload = function(e) {" +
+        String js = "fetch('" + blobUrl + "')" +
+                ".then(res => res.blob())" +
+                ".then(blob => {" +
                 "  var reader = new FileReader();" +
                 "  reader.onload = function() {" +
                 "    window.AndroidBridge.saveBase64File(reader.result, '" + fileName + "');" +
                 "  };" +
-                "  reader.readAsDataURL(xhr.response);" +
-                "};" +
-                "xhr.send();" +
-                "})();";
+                "  reader.readAsDataURL(blob);" +
+                "})" +
+                ".catch(err => console.error('Blob fetch error: ', err));";
 
         webView.addJavascriptInterface(new Object() {
             @android.webkit.JavascriptInterface
