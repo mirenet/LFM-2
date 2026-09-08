@@ -38,7 +38,7 @@ public class MainActivity extends AppCompatActivity {
     private WebView webView;
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
-    private String cachedBlobData = null; // Privremeni keš za blob podatke
+    private String cachedBlobData = null;
 
     @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
     @Override
@@ -68,12 +68,12 @@ public class MainActivity extends AppCompatActivity {
 
         webView.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
             String rawSuggestedName = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimetype);
-            if (rawSuggestedName == null || rawSuggestedName.isEmpty() || rawSuggestedName.equals("downloadfile.bin")) {
-                rawSuggestedName = "file.txt";
+            String extension = "txt";
+            if (rawSuggestedName != null && rawSuggestedName.contains(".")) {
+                extension = rawSuggestedName.substring(rawSuggestedName.lastIndexOf(".") + 1);
             }
-            final String suggestedFileName = rawSuggestedName;
+            final String suggestedFileName = "download." + extension;
 
-            // Ako je blob ili data link, odmah ga povlačimo u bazičnu memoriju pre dijaloga
             if (url.startsWith("blob:") || url.startsWith("data:")) {
                 cachedBlobData = null;
                 String js = "(function() {" +
@@ -89,7 +89,6 @@ public class MainActivity extends AppCompatActivity {
                         "})();";
                 webView.evaluateJavascript(js, null);
 
-                // Kratka pauza da JS stigne da kešira podatke pre prikazivanja dijaloga
                 webView.postDelayed(() -> showSaveDialog(suggestedFileName, url, mimetype, true), 300);
             } else {
                 cachedBlobData = null;
