@@ -59,10 +59,11 @@ public class MainActivity extends AppCompatActivity {
 
         // DownloadListener automatically catches any download triggered from HTML (including blob: and data: URLs)
         webView.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
-            String suggestedFileName = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimetype);
-            if (suggestedFileName == null || suggestedFileName.isEmpty() || suggestedFileName.equals("downloadfile.bin")) {
-                suggestedFileName = "file.txt";
+            String rawSuggestedName = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimetype);
+            if (rawSuggestedName == null || rawSuggestedName.isEmpty() || rawSuggestedName.equals("downloadfile.bin")) {
+                rawSuggestedName = "file.txt";
             }
+            final String suggestedFileName = rawSuggestedName;
 
             // Show native save file dialog automatically, exactly like a real browser
             runOnUiThread(() -> {
