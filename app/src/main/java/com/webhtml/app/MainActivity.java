@@ -38,6 +38,7 @@ public class MainActivity extends AppCompatActivity {
     private WebView webView;
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
+    private String targetFileName = ""; // Čuva naziv fajla bezbedno u Javi
 
     @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
     @Override
@@ -63,10 +64,8 @@ public class MainActivity extends AppCompatActivity {
         webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         webSettings.setMediaPlaybackRequiresUserGesture(false);
 
-        // Register permanent JavaScript interface
         webView.addJavascriptInterface(new BlobDownloadInterface(this), "AndroidDownloadBridge");
 
-        // DownloadListener with scheme check to prevent DownloadManager crash
         webView.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
             String rawSuggestedName = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimetype);
             if (rawSuggestedName == null || rawSuggestedName.isEmpty() || rawSuggestedName.equals("downloadfile.bin")) {
@@ -102,21 +101,20 @@ public class MainActivity extends AppCompatActivity {
                 builder.setView(container);
 
                 builder.setPositiveButton("Save", (dialog, which) -> {
-                    String fileName = input.getText().toString().trim();
-                    if (fileName.isEmpty()) {
-                        fileName = suggestedFileName;
+                    targetFileName = input.getText().toString().trim();
+                    if (targetFileName.isEmpty()) {
+                        targetFileName = suggestedFileName;
                     }
 
                     if (url.startsWith("http://") || url.startsWith("https://")) {
-                        // Standard HTTP/HTTPS download via DownloadManager
                         try {
                             DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
                             request.setMimeType(mimetype);
-                            request.setTitle(fileName);
+                            request.setTitle(targetFileName);
                             request.setDescription("Downloading file...");
                             request.allowScanningByMediaScanner();
                             request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-                            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
+                            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, targetFileName);
                             
                             DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
                             if (dm != null) {
@@ -127,13 +125,13 @@ public class MainActivity extends AppCompatActivity {
                             Toast.makeText(getApplicationContext(), "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
                         }
                     } else {
-                        // Blob or Data URL handling via JavaScript fetch
+                        // Čitamo blob preko JS, a naziv fajla uzimamo direktno iz Java promenljive targetFileName
                         String js = "fetch('" + url + "')" +
                                 ".then(res => res.blob())" +
                                 ".then(blob => {" +
                                 "  var reader = new FileReader();" +
                                 "  reader.onload = function() {" +
-                                "    window.AndroidDownloadBridge.saveDirectly(reader.result, '" + fileName + "');" +
+                                "    window.AndroidDownloadBridge.saveDirectly(reader.result);" +
                                 "  };" +
                                 "  reader.readAsDataURL(blob);" +
                                 "});";
@@ -258,8 +256,8 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
-        public void saveDirectly(String base64Data, String name) {
-            saveBase64ToFile(base64Data, name);
+        public void saveDirectly(String base64Data) {
+            saveBase64ToFile(base64Data, targetFileName);
         }
     }
 
