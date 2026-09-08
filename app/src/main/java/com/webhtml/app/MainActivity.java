@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Environment;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
@@ -12,10 +13,16 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import android.widget.EditText;
+import android.widget.FrameLayout;
+import android.widget.Toast;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLDecoder;
@@ -50,63 +57,75 @@ public class MainActivity extends AppCompatActivity {
         webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         webSettings.setMediaPlaybackRequiresUserGesture(false);
 
-        // DownloadListener sa dijalogom za unos naziva fajla
+        // DownloadListener automatically catches any download triggered from HTML (including blob: and data: URLs)
         webView.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
             String suggestedFileName = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimetype);
+            if (suggestedFileName == null || suggestedFileName.isEmpty() || suggestedFileName.equals("downloadfile.bin")) {
+                suggestedFileName = "file.txt";
+            }
 
-            android.text.InputFilter[] filters = new android.text.InputFilter[1];
-            filters[0] = new android.text.InputFilter.LengthFilter(100);
+            // Show native save file dialog automatically, exactly like a real browser
+            runOnUiThread(() -> {
+                android.text.InputFilter[] filters = new android.text.InputFilter[1];
+                filters[0] = new android.text.InputFilter.LengthFilter(100);
 
-            final android.widget.EditText input = new android.widget.EditText(this);
-            input.setText(suggestedFileName);
-            input.setSelection(suggestedFileName.length());
-            input.setTextColor(android.graphics.Color.WHITE);
-            input.setHintTextColor(android.graphics.Color.GRAY);
-            input.setFilters(filters);
+                final EditText input = new EditText(MainActivity.this);
+                input.setText(suggestedFileName);
+                input.setSelection(suggestedFileName.length());
+                input.setTextColor(android.graphics.Color.WHITE);
+                input.setHintTextColor(android.graphics.Color.GRAY);
+                input.setFilters(filters);
 
-            int padding = (int) (20 * getResources().getDisplayMetrics().density);
-            android.widget.FrameLayout container = new android.widget.FrameLayout(this);
-            android.widget.FrameLayout.LayoutParams params = new android.widget.FrameLayout.LayoutParams(
-                    android.view.ViewGroup.LayoutParams.MATCH_PARENT, 
-                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT
-            );
-            params.leftMargin = padding;
-            params.rightMargin = padding;
-            input.setLayoutParams(params);
-            container.addView(input);
+                int padding = (int) (20 * getResources().getDisplayMetrics().density);
+                FrameLayout container = new FrameLayout(MainActivity.this);
+                FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT, 
+                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+                );
+                params.leftMargin = padding;
+                params.rightMargin = padding;
+                input.setLayoutParams(params);
+                container.addView(input);
 
-            AlertDialog.Builder builder = new AlertDialog.Builder(this);
-            builder.setTitle("Save File");
-            builder.setMessage("Enter File Name:");
-            builder.setView(container);
+                AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
+                builder.setTitle("Save File");
+                builder.setMessage("Enter File Name:");
+                builder.setView(container);
 
-            builder.setPositiveButton("Save", (dialog, which) -> {
-                String fileName = input.getText().toString().trim();
-                if (fileName.isEmpty()) {
-                    fileName = suggestedFileName;
-                }
-
-                try {
-                    android.app.DownloadManager.Request request = new android.app.DownloadManager.Request(Uri.parse(url));
-                    request.setMimeType(mimetype);
-                    request.setTitle(fileName);
-                    request.setDescription("Saving File...");
-                    request.allowScanningByMediaScanner();
-                    request.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-                    request.setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, fileName);
-                    
-                    android.app.DownloadManager dm = (android.app.DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-                    if (dm != null) {
-                        dm.enqueue(request);
-                        android.widget.Toast.makeText(getApplicationContext(), "Saving File...", android.widget.Toast.LENGTH_SHORT).show();
+                builder.setPositiveButton("Save", (dialog, which) -> {
+                    String fileName = input.getText().toString().trim();
+                    if (fileName.isEmpty()) {
+                        fileName = suggestedFileName;
                     }
-                } catch (Exception e) {
-                    android.widget.Toast.makeText(getApplicationContext(), "Error: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show();
-                }
-            });
 
-            builder.setNegativeButton("Cancel", (dialog, which) -> dialog.cancel());
-            builder.show();
+                    // Handle blob and data URLs seamlessly
+                    if (url.startsWith("blob:") || url.startsWith("data:")) {
+                        saveBlobOrDataUrl(url, fileName);
+                    } else {
+                        // Handle standard HTTP/HTTPS links via DownloadManager
+                        try {
+                            android.app.DownloadManager.Request request = new android.app.DownloadManager.Request(Uri.parse(url));
+                            request.setMimeType(mimetype);
+                            request.setTitle(fileName);
+                            request.setDescription("Downloading file...");
+                            request.allowScanningByMediaScanner();
+                            request.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName);
+                            
+                            android.app.DownloadManager dm = (android.app.DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+                            if (dm != null) {
+                                dm.enqueue(request);
+                                Toast.makeText(getApplicationContext(), "Download started...", Toast.LENGTH_SHORT).show();
+                            }
+                        } catch (Exception e) {
+                            Toast.makeText(getApplicationContext(), "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                        }
+                    }
+                });
+
+                builder.setNegativeButton("Cancel", (dialog, which) -> dialog.cancel());
+                builder.show();
+            });
         });
 
         webView.setWebViewClient(new WebViewClient() {
@@ -211,6 +230,59 @@ public class MainActivity extends AppCompatActivity {
         });
 
         webView.loadUrl("file:///android_asset/index.html");
+    }
+
+    // Helper method to automatically fetch blob data and save it with the custom filename
+    private void saveBlobOrDataUrl(String blobUrl, String fileName) {
+        String js = "(function() {" +
+                "var xhr = new XMLHttpRequest();" +
+                "xhr.open('GET', '" + blobUrl + "', true);" +
+                "xhr.responseType = 'blob';" +
+                "xhr.onload = function(e) {" +
+                "  var reader = new FileReader();" +
+                "  reader.onload = function() {" +
+                "    window.AndroidBridge.saveBase64File(reader.result, '" + fileName + "');" +
+                "  };" +
+                "  reader.readAsDataURL(xhr.response);" +
+                "};" +
+                "xhr.send();" +
+                "})();";
+
+        webView.addJavascriptInterface(new Object() {
+            @android.webkit.JavascriptInterface
+            public void saveBase64File(String base64Data, String name) {
+                try {
+                    String base64Content = base64Data;
+                    if (base64Data.contains(",")) {
+                        base64Content = base64Data.split(",")[1];
+                    }
+                    byte[] decodedBytes = android.util.Base64.decode(base64Content, android.util.Base64.DEFAULT);
+
+                    File downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                    if (!downloadsDir.exists()) {
+                        downloadsDir.mkdirs();
+                    }
+
+                    File file = new File(downloadsDir, name);
+                    OutputStream os = new FileOutputStream(file);
+                    os.write(decodedBytes);
+                    os.flush();
+                    os.close();
+
+                    Intent scanIntent = new Intent(Intent.ACTION_MEDIA_SCANNER_SCAN_FILE);
+                    scanIntent.setData(Uri.fromFile(file));
+                    sendBroadcast(scanIntent);
+
+                    runOnUiThread(() -> Toast.makeText(getApplicationContext(), "File saved: " + name, Toast.LENGTH_LONG).show());
+                } catch (Exception e) {
+                    runOnUiThread(() -> Toast.makeText(getApplicationContext(), "Error saving file: " + e.getMessage(), Toast.LENGTH_LONG).show());
+                } finally {
+                    webView.removeJavascriptInterface("AndroidBridge");
+                }
+            }
+        }, "AndroidBridge");
+
+        webView.evaluateJavascript(js, null);
     }
 
     @Override
