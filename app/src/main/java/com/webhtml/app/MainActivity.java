@@ -28,8 +28,11 @@ public class MainActivity extends AppCompatActivity {
     @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // Forsiranje uvek tamnog režima u aplikaciji
+        androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
+            androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES
+        );
         super.onCreate(savedInstanceState);
-        
         
         webView = new WebView(this);
         webView.setBackgroundColor(android.graphics.Color.parseColor("#070707"));
@@ -47,6 +50,30 @@ public class MainActivity extends AppCompatActivity {
         webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         webSettings.setMediaPlaybackRequiresUserGesture(false);
 
+        // Omogućavanje preuzimanja fajlova (Download / Export)
+        webView.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
+            try {
+                android.app.DownloadManager.Request request = new android.app.DownloadManager.Request(Uri.parse(url));
+                request.setMimeType(mimetype);
+                
+                String fileName = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimetype);
+                
+                request.setTitle(fileName);
+                request.setDescription("Preuzimanje fajla...");
+                request.allowScanningByMediaScanner();
+                request.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                request.setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, fileName);
+                
+                android.app.DownloadManager dm = (android.app.DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+                if (dm != null) {
+                    dm.enqueue(request);
+                    android.widget.Toast.makeText(getApplicationContext(), "Preuzimanje je počelo...", android.widget.Toast.LENGTH_SHORT).show();
+                }
+            } catch (Exception e) {
+                android.widget.Toast.makeText(getApplicationContext(), "Greška pri preuzimanju: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show();
+            }
+        });
+
         webView.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
@@ -58,13 +85,11 @@ public class MainActivity extends AppCompatActivity {
             public WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
                 String urlStr = request.getUrl().toString();
                 
-                // Ako nema hashtag-a (#), propuštamo standardni WebView zahtev (rešava CORS)
                 if (!urlStr.contains("#")) {
                     return super.shouldInterceptRequest(view, request);
                 }
 
                 try {
-                    // Delimo URL na čisti deo i parametre posle #
                     String[] mainParts = urlStr.split("#", 2);
                     String cleanUrlStr = mainParts[0];
                     String fragment = mainParts[1];
@@ -72,18 +97,15 @@ public class MainActivity extends AppCompatActivity {
                     boolean isHtmlMode = fragment.contains("html");
                     boolean isApiMode = fragment.contains("api");
 
-                    // Definisanje podrazumevanog UA prema modu
                     String defaultUa;
                     if (isHtmlMode) {
                         defaultUa = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
                     } else if (isApiMode) {
                         defaultUa = "LFM_MusicApp/1.0 (contact: moj@gmail.com)";
                     } else {
-                        // Ako nema ni #html ni #api, uzimamo sistemski WebView UA
                         defaultUa = webView.getSettings().getUserAgentString();
                     }
 
-                    // Provera da li postoji opcionalni &ua= ili ua= parametar u fragmentu
                     String finalUa = defaultUa;
                     if (fragment.contains("ua=")) {
                         try {
@@ -97,13 +119,11 @@ public class MainActivity extends AppCompatActivity {
                         } catch (Exception ignored) {}
                     }
 
-                    // Izvršavanje mrežnog zahteva preko HttpURLConnection u Javi
                     URL url = new URL(cleanUrlStr);
                     HttpURLConnection connection = (HttpURLConnection) url.openConnection();
                     connection.setRequestMethod("GET");
                     connection.setRequestProperty("User-Agent", finalUa);
                     
-                    // Fiksni headeri za HTML mod
                     if (isHtmlMode) {
                         connection.setRequestProperty("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8");
                         connection.setRequestProperty("Accept-Language", "en-US,en;q=0.9");
@@ -128,7 +148,7 @@ public class MainActivity extends AppCompatActivity {
                     return new WebResourceResponse(mimeType.split(";")[0].trim(), encoding, inputStream);
 
                 } catch (Exception e) {
-                    // Ako bilo šta pukne, vraća se null da WebView odradi fallback
+                    // Fallback
                 }
                 
                 return super.shouldInterceptRequest(view, request);
