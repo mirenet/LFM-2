@@ -12,6 +12,7 @@ import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
+import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
 import java.io.InputStream;
@@ -28,7 +29,6 @@ public class MainActivity extends AppCompatActivity {
     @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        // Forsiranje uvek tamnog režima u aplikaciji
         androidx.appcompat.app.AppCompatDelegate.setDefaultNightMode(
             androidx.appcompat.app.AppCompatDelegate.MODE_NIGHT_YES
         );
@@ -50,28 +50,63 @@ public class MainActivity extends AppCompatActivity {
         webSettings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         webSettings.setMediaPlaybackRequiresUserGesture(false);
 
-        // Omogućavanje preuzimanja fajlova (Download / Export)
+        // DownloadListener sa dijalogom za unos naziva fajla
         webView.setDownloadListener((url, userAgent, contentDisposition, mimetype, contentLength) -> {
-            try {
-                android.app.DownloadManager.Request request = new android.app.DownloadManager.Request(Uri.parse(url));
-                request.setMimeType(mimetype);
-                
-                String fileName = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimetype);
-                
-                request.setTitle(fileName);
-                request.setDescription("Preuzimanje fajla...");
-                request.allowScanningByMediaScanner();
-                request.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-                request.setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, fileName);
-                
-                android.app.DownloadManager dm = (android.app.DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-                if (dm != null) {
-                    dm.enqueue(request);
-                    android.widget.Toast.makeText(getApplicationContext(), "Preuzimanje je počelo...", android.widget.Toast.LENGTH_SHORT).show();
+            String suggestedFileName = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimetype);
+
+            android.text.InputFilter[] filters = new android.text.InputFilter[1];
+            filters[0] = new android.text.InputFilter.LengthFilter(100);
+
+            final android.widget.EditText input = new android.widget.EditText(this);
+            input.setText(suggestedFileName);
+            input.setSelection(suggestedFileName.length());
+            input.setTextColor(android.graphics.Color.WHITE);
+            input.setHintTextColor(android.graphics.Color.GRAY);
+            input.setFilters(filters);
+
+            int padding = (int) (20 * getResources().getDisplayMetrics().density);
+            android.widget.FrameLayout container = new android.widget.FrameLayout(this);
+            android.widget.FrameLayout.LayoutParams params = new android.widget.FrameLayout.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT, 
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+            );
+            params.leftMargin = padding;
+            params.rightMargin = padding;
+            input.setLayoutParams(params);
+            container.addView(input);
+
+            AlertDialog.Builder builder = new AlertDialog.Builder(this);
+            builder.setTitle("Sačuvaj fajl");
+            builder.setMessage("Unesi naziv fajla koji želiš da preuzmeš:");
+            builder.setView(container);
+
+            builder.setPositiveButton("Preuzmi", (dialog, which) -> {
+                String fileName = input.getText().toString().trim();
+                if (fileName.isEmpty()) {
+                    fileName = suggestedFileName;
                 }
-            } catch (Exception e) {
-                android.widget.Toast.makeText(getApplicationContext(), "Greška pri preuzimanju: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show();
-            }
+
+                try {
+                    android.app.DownloadManager.Request request = new android.app.DownloadManager.Request(Uri.parse(url));
+                    request.setMimeType(mimetype);
+                    request.setTitle(fileName);
+                    request.setDescription("Preuzimanje fajla...");
+                    request.allowScanningByMediaScanner();
+                    request.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                    request.setDestinationInExternalPublicDir(android.os.Environment.DIRECTORY_DOWNLOADS, fileName);
+                    
+                    android.app.DownloadManager dm = (android.app.DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+                    if (dm != null) {
+                        dm.enqueue(request);
+                        android.widget.Toast.makeText(getApplicationContext(), "Preuzimanje je počelo...", android.widget.Toast.LENGTH_SHORT).show();
+                    }
+                } catch (Exception e) {
+                    android.widget.Toast.makeText(getApplicationContext(), "Greška pri preuzimanju: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show();
+                }
+            });
+
+            builder.setNegativeButton("Otkaži", (dialog, which) -> dialog.cancel());
+            builder.show();
         });
 
         webView.setWebViewClient(new WebViewClient() {
