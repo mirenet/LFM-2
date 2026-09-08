@@ -38,6 +38,7 @@ public class MainActivity extends AppCompatActivity {
     private WebView webView;
     private ValueCallback<Uri[]> uploadMessage;
     private final static int FILE_CHOOSER_RESULT_CODE = 1;
+    private String cachedBlobData = null; // Privremeni keš za blob podatke
 
     @SuppressLint({"SetJavaScriptEnabled", "QueryPermissionsNeeded"})
     @Override
@@ -72,77 +73,28 @@ public class MainActivity extends AppCompatActivity {
             }
             final String suggestedFileName = rawSuggestedName;
 
-            runOnUiThread(() -> {
-                android.text.InputFilter[] filters = new android.text.InputFilter[1];
-                filters[0] = new android.text.InputFilter.LengthFilter(100);
+            // Ako je blob ili data link, odmah ga povlačimo u bazičnu memoriju pre dijaloga
+            if (url.startsWith("blob:") || url.startsWith("data:")) {
+                cachedBlobData = null;
+                String js = "(function() {" +
+                        "  fetch('" + url + "')" +
+                        "    .then(res => res.blob())" +
+                        "    .then(blob => {" +
+                        "      var reader = new FileReader();" +
+                        "      reader.onload = function() {" +
+                        "        window.AndroidDownloadBridge.cacheData(reader.result);" +
+                        "      };" +
+                        "      reader.readAsDataURL(blob);" +
+                        "    }).catch(err => window.AndroidDownloadBridge.cacheData('ERROR'));" +
+                        "})();";
+                webView.evaluateJavascript(js, null);
 
-                final EditText input = new EditText(MainActivity.this);
-                input.setText(suggestedFileName);
-                input.setSelection(suggestedFileName.length());
-                input.setTextColor(android.graphics.Color.WHITE);
-                input.setHintTextColor(android.graphics.Color.GRAY);
-                input.setFilters(filters);
-
-                int padding = (int) (20 * getResources().getDisplayMetrics().density);
-                FrameLayout container = new FrameLayout(MainActivity.this);
-                FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
-                        android.view.ViewGroup.LayoutParams.MATCH_PARENT, 
-                        android.view.ViewGroup.LayoutParams.WRAP_CONTENT
-                );
-                params.leftMargin = padding;
-                params.rightMargin = padding;
-                input.setLayoutParams(params);
-                container.addView(input);
-
-                AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
-                builder.setTitle("Save File");
-                builder.setMessage("Enter File Name:");
-                builder.setView(container);
-
-                builder.setPositiveButton("Save", (dialog, which) -> {
-                    String inputName = input.getText().toString().trim();
-                    if (inputName.isEmpty()) {
-                        inputName = suggestedFileName;
-                    }
-                    
-                    final String finalFileName = inputName.replaceAll("[\\\\/:*?\"<>|]", "_");
-
-                    if (url.startsWith("http://") || url.startsWith("https://")) {
-                        try {
-                            DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-                            request.setMimeType(mimetype);
-                            request.setTitle(finalFileName);
-                            request.setDescription("Downloading file...");
-                            request.allowScanningByMediaScanner();
-                            request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-                            request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, finalFileName);
-                            
-                            DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
-                            if (dm != null) {
-                                dm.enqueue(request);
-                                Toast.makeText(getApplicationContext(), "Download started...", Toast.LENGTH_SHORT).show();
-                            }
-                        } catch (Exception e) {
-                            Toast.makeText(getApplicationContext(), "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                        }
-                    } else {
-                        // Prosledjujemo ime direktno kroz JS varijablu unutar skripte da se ne bi izgubilo
-                        String js = "fetch('" + url + "')" +
-                                ".then(res => res.blob())" +
-                                ".then(blob => {" +
-                                "  var reader = new FileReader();" +
-                                "  reader.onload = function() {" +
-                                "    window.AndroidDownloadBridge.saveDirectly(reader.result, '" + finalFileName.replace("'", "\\'") + "');" +
-                                "  };" +
-                                "  reader.readAsDataURL(blob);" +
-                                "});";
-                        webView.evaluateJavascript(js, null);
-                    }
-                });
-
-                builder.setNegativeButton("Cancel", (dialog, which) -> dialog.cancel());
-                builder.show();
-            });
+                // Kratka pauza da JS stigne da kešira podatke pre prikazivanja dijaloga
+                webView.postDelayed(() -> showSaveDialog(suggestedFileName, url, mimetype, true), 300);
+            } else {
+                cachedBlobData = null;
+                showSaveDialog(suggestedFileName, url, mimetype, false);
+            }
         });
 
         webView.setWebViewClient(new WebViewClient() {
@@ -257,9 +209,77 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
-        public void saveDirectly(String base64Data, String name) {
-            saveBase64ToFile(base64Data, name);
+        public void cacheData(String data) {
+            cachedBlobData = data;
         }
+    }
+
+    private void showSaveDialog(String suggestedFileName, String url, String mimetype, boolean isBlob) {
+        runOnUiThread(() -> {
+            android.text.InputFilter[] filters = new android.text.InputFilter[1];
+            filters[0] = new android.text.InputFilter.LengthFilter(100);
+
+            final EditText input = new EditText(MainActivity.this);
+            input.setText(suggestedFileName);
+            input.setSelection(suggestedFileName.length());
+            input.setTextColor(android.graphics.Color.WHITE);
+            input.setHintTextColor(android.graphics.Color.GRAY);
+            input.setFilters(filters);
+
+            int padding = (int) (20 * getResources().getDisplayMetrics().density);
+            FrameLayout container = new FrameLayout(MainActivity.this);
+            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                    android.view.ViewGroup.LayoutParams.MATCH_PARENT, 
+                    android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+            );
+            params.leftMargin = padding;
+            params.rightMargin = padding;
+            input.setLayoutParams(params);
+            container.addView(input);
+
+            AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
+            builder.setTitle("Save File");
+            builder.setMessage("Enter File Name:");
+            builder.setView(container);
+
+            builder.setPositiveButton("Save", (dialog, which) -> {
+                String inputName = input.getText().toString().trim();
+                if (inputName.isEmpty()) {
+                    inputName = suggestedFileName;
+                }
+                
+                final String finalFileName = inputName.replaceAll("[\\\\/:*?\"<>|]", "_");
+
+                if (isBlob) {
+                    if (cachedBlobData != null && !cachedBlobData.equals("ERROR")) {
+                        saveBase64ToFile(cachedBlobData, finalFileName);
+                    } else {
+                        Toast.makeText(getApplicationContext(), "Error: Blob data not ready or expired.", Toast.LENGTH_LONG).show();
+                    }
+                } else {
+                    try {
+                        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+                        request.setMimeType(mimetype);
+                        request.setTitle(finalFileName);
+                        request.setDescription("Downloading file...");
+                        request.allowScanningByMediaScanner();
+                        request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                        request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, finalFileName);
+                        
+                        DownloadManager dm = (DownloadManager) getSystemService(DOWNLOAD_SERVICE);
+                        if (dm != null) {
+                            dm.enqueue(request);
+                            Toast.makeText(getApplicationContext(), "Download started...", Toast.LENGTH_SHORT).show();
+                        }
+                    } catch (Exception e) {
+                        Toast.makeText(getApplicationContext(), "Error: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                }
+            });
+
+            builder.setNegativeButton("Cancel", (dialog, which) -> dialog.cancel());
+            builder.show();
+        });
     }
 
     private void saveBase64ToFile(String base64Data, String name) {
